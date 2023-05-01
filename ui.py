@@ -377,7 +377,7 @@ class Workshop(MayaQWidgetDockableMixin, QMainWindow):
 
     def _buildBlueprintTab(self, parent, bpName):
         # WIDGET
-        blueprintTab = QWidget()
+        blueprintTab = QWidgetRelativeChildren()
         parent.addTab(blueprintTab, bpName)
         
         # MAIN LAYOUT
@@ -415,16 +415,25 @@ class Workshop(MayaQWidgetDockableMixin, QMainWindow):
         #                                background-color: rgb(255, 0, 0);
         #                                }''')
         scrollArea.setWidget(scrollWidget)
-        scrollLayout = QVBoxLayout()
-        scrollLayout.setContentsMargins(5, 0, 5, 0)
-        scrollLayout.setSizeConstraint(QLayout.SetMinAndMaxSize)
-        # scrollWidget.setLayout(scrollLayout)
         mainLayout.addWidget(scrollArea)
         
-        for i in range(10):
-            item = DragItem(str(i))
-            item.set_data(i)  # Store the data.
-            scrollWidget.add_item(item)
+        for i in range(5):
+            sublod = Instruction(title=f"Action {i}", hue=(i*130)%360)
+            scrollWidget.add_item(sublod)
+            lyt = QVBoxLayout()
+            for i in range(3):
+                lyt.addWidget(QPushButton(f"Task {i}"))
+            sublod.setContentLayout(lyt)
+        
+        spacer = DragItem()
+        spacer.setFixedHeight(60*self.ratio)
+        spacer.setDragEnabled(False)
+        scrollWidget.add_item(spacer)
+            
+        
+        # ADD ACTION BUTTON
+        addActionBtn = AddInstructionButton("+", blueprintTab)
+        blueprintTab.setFixedChildren(addActionBtn, f"w/2-({100*self.ratio})", f"h-{140*self.ratio}")
         
         
         # BUILD MODULE BUTTON
@@ -580,11 +589,12 @@ class SideButton(QPushButton):
         self.ratio = getScreenRatio()
         self.setFixedSize(25*self.ratio, 25*self.ratio)
         self.setStyleSheet('''
-                           QPushButton{
+                           SideButton{
                                color: white;
-                               border: 0px solid;
-                               border-radius: 5px;
-                               font-weight: bold;}
+                               border: none;
+                               border-radius: 6px;
+                               font-weight: bold;
+                               }
                            ''')
         
         self.set(side)
@@ -627,11 +637,40 @@ class EditableLabel(QLineEdit):
     def __init__(self, text, parent=None):
         super().__init__(parent)
         self.setText(text)
-        self.setEnabled(False)
+        self.setReadOnly(True)
         
-    def mouseDoubleClickEvent(self):
-        self.setEnabled(True)
-        return
+        # disbale if enter is pressed
+        self.returnPressed.connect(self.toggleReadOnly)
+        
+        # enable resize to content
+        self.resizeToContent()
+        self.textChanged.connect(self.resizeToContent)
+        
+        self.setTextMargins(5, 0, 0, 2)
+        self.setStyleSheet('''background-color: rgba(0, 0, 0, 0); border: none;''')
+        
+    def mouseDoubleClickEvent(self, e):
+        self.setReadOnly(False)
+        mc.select(cl=True)
+        self.setStyleSheet('''background-color: rgba(0, 0, 0, 70); border: none;''')
+    
+    def focusOutEvent(self, e):
+        self.setReadOnly(True)
+        self.setStyleSheet('''background-color: rgba(0, 0, 0, 0); border: none;''')
+        return super().focusOutEvent(e)
+    
+    def toggleReadOnly(self):
+        self.setReadOnly(not self.isReadOnly())
+        self.setStyleSheet('''background-color: rgba(0, 0, 0, 0); border: none;''')
+    
+    def resizeToContent(self):
+        ratio = getScreenRatio()
+        text = self.text()
+        fm = QFontMetrics(self.font())
+        pixelsWide = fm.width(text)+(15*ratio)
+        if pixelsWide < 350*ratio:
+            self.setFixedWidth(pixelsWide)
+            self.adjustSize()
 
 class ImageWidget(QWidget):
     def __init__(self, filename, parent=None):
@@ -653,6 +692,7 @@ class ImageWidget(QWidget):
     
     def _initUI(self):
         layout = QVBoxLayout(self)
+        layout.setMargin(0)
         layout.setAlignment(Qt.AlignCenter)
 
         pixmap = QPixmap(self.path)
@@ -728,7 +768,7 @@ class SwitchButton(QPushButton):
         painter.setPen(pen)
         painter.drawText(sw_rect, Qt.AlignCenter, label)
         
-class DragWidget(QWidget):  # MAYBE QListView?
+class DragWidget(QWidget):
     """
     Generic list sorting handler.
     """
@@ -743,28 +783,40 @@ class DragWidget(QWidget):  # MAYBE QListView?
         self.orientation = orientation
 
         if self.orientation == Qt.Orientation.Vertical:
-            self.blayout = QVBoxLayout()
+            self.dragLayout = QVBoxLayout()
         else:
-            self.blayout = QHBoxLayout()
+            self.dragLayout = QHBoxLayout()
 
-        self.setLayout(self.blayout)
-        self.blayout.setSizeConstraint(QLayout.SetMinAndMaxSize)
+        self.setLayout(self.dragLayout)
+        self.dragLayout.setSizeConstraint(QLayout.SetMinAndMaxSize)
+        
+        dropIndicator = DragItem()
+        dropIndicator.setStyleSheet("background-color: white; border: 1px solid white;")
+        if self.orientation == Qt.Orientation.Vertical:
+            dropIndicator.setFixedHeight(2)
+        else:
+            dropIndicator.setFixedWidth(2)
+        dropIndicator.setVisible(False)
+        self.add_item(dropIndicator)
+        self.dropIndicator = dropIndicator
 
     def dragEnterEvent(self, e):
         e.accept()
-        self.setDropIndicatorShown(True)
-
-    def dropEvent(self, e):
+        self.dropIndicator.setVisible(True)
+            
+    def dragMoveEvent(self, e):
+        e.accept()
         pos = e.pos()
-        widget = e.source()
-        # dropIndicator = DropIndicatorPosition()
+        indicatorY = self.dropIndicator.y()
 
-        for n in range(self.blayout.count()):
+        for n in range(self.dragLayout.count()):
             # Get the widget at each index in turn.
-            w = self.blayout.itemAt(n).widget()
+            w = self.dragLayout.itemAt(n).widget()
+            if w == self.dropIndicator:
+                continue
             if self.orientation == Qt.Orientation.Vertical:
                 # Drag drop vertically.
-                drop_here = pos.y() < w.y() + w.size().height() // 2
+                drop_here = pos.y() < w.y() - w.size().height() // 3
             else:
                 # Drag drop horizontally.
                 drop_here = pos.x() < w.x() + w.size().width() // 2
@@ -772,41 +824,211 @@ class DragWidget(QWidget):  # MAYBE QListView?
             if drop_here:
                 # We didn't drag past this widget.
                 # insert to the left of it.
-                self.blayout.insertWidget(n-1, widget)
+                if pos.y() > indicatorY:
+                    insertAt = n-2
+                else:
+                    insertAt = n-1
+                self.dragLayout.insertWidget(insertAt, self.dropIndicator)
                 self.orderChanged.emit(self.get_item_data())
+                # widget.setVisible(True)
+                break
+
+    def dropEvent(self, e):
+        pos = e.pos()
+        widget = e.source()
+
+        for n in range(self.dragLayout.count()):
+            # Get the widget at each index in turn.
+            w = self.dragLayout.itemAt(n).widget()
+            if self.orientation == Qt.Orientation.Vertical:
+                # Drag drop vertically.
+                drop_here = pos.y() < w.y() - ((w.size().height())//3)
+            else:
+                # Drag drop horizontally.
+                drop_here = pos.x() < w.x() + w.size().width() // 2
+
+            if drop_here:
+                # We didn't drag past this widget.
+                # insert to the left of it.
+                self.dragLayout.insertWidget(n-1, widget)
+                self.orderChanged.emit(self.get_item_data())
+                # widget.setVisible(True)
                 break
             
-        self.setDropIndicatorShown(False)
+        self.dropIndicator.setVisible(False)
 
         e.accept()
 
     def add_item(self, item):
-        self.blayout.addWidget(item)
+        self.dragLayout.addWidget(item)
 
     def get_item_data(self):
         data = []
-        for n in range(self.blayout.count()):
+        for n in range(self.dragLayout.count()):
             # Get the widget at each index in turn.
-            w = self.blayout.itemAt(n).widget()
+            w = self.dragLayout.itemAt(n).widget()
             data.append(w.data)
         return data
 
 class DragItem(QLabel):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setContentsMargins(25, 5, 25, 5)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet("border: 1px solid black;")
+    def __init__(self, data=None, parent=None):
+        super().__init__(parent)
+        self.setContentsMargins(0, 0, 0, 0)
         # Store data separately from display label, but use label for default.
-        self.data = self.text()
+        self.data = data
         self.setFixedHeight(50)
 
     def set_data(self, data):
         self.data = data
+        
+    def setDragEnabled(self, val):
+        self.dragEnabled = val
 
     def mouseMoveEvent(self, e):
 
+        if e.buttons() == Qt.LeftButton and self.dragEnabled:
+            drag = QDrag(self)
+            mime = QMimeData()
+            drag.setMimeData(mime)
+
+            pixmap = QPixmap(self.size())
+            self.render(pixmap)
+            drag.setPixmap(pixmap)
+
+            drag.exec_(Qt.MoveAction)
+
+class Instruction(QWidget):
+    def __init__(self, title='', hue=0, animationDuration=150, parent=None):
+        """
+        References:
+            # Adapted from PyQt4 version
+            https://stackoverflow.com/a/37927256/386398
+            # Adapted from c++ version
+            https://stackoverflow.com/a/37119983/386398
+        """
+        super(Instruction, self).__init__(parent=parent)
+
+        self.animationDuration = animationDuration
+        self.toggleAnimation = QParallelAnimationGroup()
+        self.contentArea =  QScrollArea()
+        self.toggleButton = QToolButton()
+        self.ratio = getScreenRatio()
+        
+        headerBar = QFrame()
+        headerBar.setStyleSheet(''' QFrame{
+                                        background-color: hsl('''+str(hue)+''', 50, 100);
+                                        border: none;
+                                        border-radius: 5px;
+                                        }
+                                    *{ 
+                                        color: white;}''')
+                
+        checkBox = QCheckBox()
+        checkBox.setStyleSheet('''
+                                QCheckBox{
+                                    border-radius: 5px;
+                                    border: none;
+                                    background-color: white;
+                                    color: black;
+                                    }''')
+        checkBox.setChecked(True)
+        self.checkBox = checkBox
+        
+        actionIcon = ImageWidget("blank_w.svg", 24*self.ratio, 24*self.ratio)
+        self.actionImage = actionIcon
+        
+        actionTitle = EditableLabel(title)
+        self.actionTitle = actionTitle
+        
+        actionDescription = QLabel("3 actions")
+        actionDescription.setStyleSheet("QLabel{ font-size: 14px}")
+        self.actionDescription = actionDescription
+        
+        playButton = ImageWidget("blank_w.svg", 16*self.ratio, 16*self.ratio)
+        self.playButton = playButton
+        
+        deleteButton = ImageWidget("blank_w.svg", 16*self.ratio, 16*self.ratio)
+        self.deleteButton = deleteButton
+        
+        line = QWidget()
+        line.setFixedSize(2, 30*self.ratio)
+        line.setStyleSheet("background-color: white;")
+
+        toggleButton = self.toggleButton
+        toggleButton.setStyleSheet("QToolButton { border: none; }")
+        toggleButton.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        toggleButton.setArrowType(Qt.UpArrow)
+        toggleButton.setCheckable(True)
+        
+        headerLayout = QHBoxLayout()
+        headerLayout.addSpacing(5)
+        headerLayout.setSpacing(15*self.ratio)
+        headerLayout.addWidget(checkBox)
+        headerLayout.addWidget(actionIcon)
+        headerLayout.addWidget(actionTitle)
+        headerLayout.addStretch()
+        headerLayout.addWidget(actionDescription)
+        headerLayout.addWidget(playButton)
+        headerLayout.addWidget(deleteButton)
+        headerLayout.addWidget(line)
+        headerLayout.addSpacing(5)
+        headerLayout.addWidget(toggleButton)
+        headerBar.setLayout(headerLayout)
+
+        self.contentArea.setStyleSheet("QScrollArea { background-color: rgba(0,0,0,0); border: none; }")
+        self.contentArea.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # start out collapsed
+        self.contentArea.setMaximumHeight(0)
+        self.contentArea.setMinimumHeight(0)
+        # let the entire widget grow and shrink with its content
+        toggleAnimation = self.toggleAnimation
+        toggleAnimation.addAnimation(QPropertyAnimation(self, b"minimumHeight"))
+        toggleAnimation.addAnimation(QPropertyAnimation(self, b"maximumHeight"))
+        toggleAnimation.addAnimation(QPropertyAnimation(self.contentArea, b"maximumHeight"))
+        # don't waste space
+        mainLayout = QVBoxLayout()
+        mainLayout.setSpacing(0)
+        mainLayout.setContentsMargins(0, 0, 0, 0)
+        mainLayout.addWidget(headerBar)
+        mainLayout.addWidget(self.contentArea)
+        self.mainLayout = mainLayout
+        self.setLayout(self.mainLayout)
+        
+        # Store data for drag n drop
+        self.data = title
+
+        def start_animation(checked):
+            arrow_type = Qt.DownArrow if checked else Qt.UpArrow
+            direction = QAbstractAnimation.Forward if checked else QAbstractAnimation.Backward
+            toggleButton.setArrowType(arrow_type)
+            self.toggleAnimation.setDirection(direction)
+            self.toggleAnimation.start()
+
+        self.toggleButton.clicked.connect(start_animation)
+        # START COLLAPSED
+        start_animation(False)
+
+    def setContentLayout(self, contentLayout):
+        # Not sure if this is equivalent to self.contentArea.destroy()
+        self.contentArea.destroy()
+        self.contentArea.setLayout(contentLayout)
+        collapsedHeight = self.sizeHint().height() - self.contentArea.maximumHeight()
+        contentHeight = contentLayout.sizeHint().height()
+        for i in range(self.toggleAnimation.animationCount()-1):
+            expandAnimation = self.toggleAnimation.animationAt(i)
+            expandAnimation.setDuration(self.animationDuration)
+            expandAnimation.setStartValue(collapsedHeight)
+            expandAnimation.setEndValue(collapsedHeight + contentHeight)
+        contentAnimation = self.toggleAnimation.animationAt(self.toggleAnimation.animationCount() - 1)
+        contentAnimation.setDuration(self.animationDuration)
+        contentAnimation.setStartValue(0)
+        contentAnimation.setEndValue(contentHeight)
+
+    def set_data(self, data):
+        self.data = data
+        
+    def mouseMoveEvent(self, e):
         if e.buttons() == Qt.LeftButton:
             drag = QDrag(self)
             mime = QMimeData()
@@ -817,3 +1039,91 @@ class DragItem(QLabel):
             drag.setPixmap(pixmap)
 
             drag.exec_(Qt.MoveAction)
+            
+
+
+    def collapse(self):
+        self.toggleButton.setChecked(True)
+        self.toggleButton.click()
+        
+    def expand(self):
+        self.toggleButton.setChecked(False)
+        self.toggleButton.click()
+
+class AddInstructionButton(QPushButton):
+    def __init__(self, text, parent):
+        super().__init__(text, parent)
+        ratio = getScreenRatio()
+        
+        self.setStyleSheet('''
+                            QPushButton{
+                                background-color: #51C080;
+                                border-radius: 5px;
+                                font-weight: bold;
+                                font-size: 24px;
+                                color: white;
+                                }
+                            QPushButton:hover{
+                                background-color: #6FCF97;
+                                }
+                            ''')
+        self.setMinimumHeight(35*ratio)
+        self.setFixedWidth(200*ratio)
+        self.raise_()
+        
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setColor(QColor(0, 0, 0, 100))
+        shadow.setOffset(0, 10)
+        shadow.setBlurRadius(50)
+        self.shadow = shadow
+        self.setGraphicsEffect(shadow)
+        self.setAttribute(Qt.WA_Hover, True)
+    
+    def enterEvent(self, e):
+        self.shadow.setColor(QColor(0, 0, 0, 150))
+        self.shadow.setBlurRadius(100)
+        self.shadow.setOffset(0, 20)
+        
+    def leaveEvent(self, e):
+        self.shadow.setColor(QColor(0, 0, 0, 100))
+        self.shadow.setBlurRadius(50)
+        self.shadow.setOffset(0, 10)
+
+class QWidgetRelativeChildren(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)        
+        self.fixedChildren = {}
+        
+    def setFixedChildren(self, child, posX, posY):
+        self.fixedChildren[str(child)] = [child, posX, posY]
+        
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        for key, value in self.fixedChildren.items():
+            child, x, y = value
+            x, y = self.getChildPosition(x, y)
+            child.move(x, y)
+
+    def getChildPosition(self, x, y):
+        """
+        Calculate the x and y position
+
+        Args:
+            x (str, float): the x position
+            y (str, float): the y position
+
+        Returns:
+            list: [x, y]
+        """
+        ret = []
+        for ax, size in zip([x, y], [self.width(), self.height()]):
+            if "%" in ax:
+                pos = size / 100 * float(ax.replace("%", ""))
+            elif "w" in ax or "h" in ax:
+                size = str(size)
+                pos = eval(ax.replace("w", size).replace("h", size))
+            else:
+                pos = float(ax)
+            ret.append(pos)
+            
+        return ret
